@@ -1,0 +1,35 @@
+[package]
+name = "polkadot-interaction-examples"
+version = "0.1.0"
+edition = "2018"
+
+[lib]
+name = "utils"
+path = "src/utils/lib.rs"
+edition = "2018"
+
+[dependencies]
+anyhow = "1.0.43"
+frame-metadata = { version = "15.0.0", features = ["v13"] }
+hex = "0.4.3"
+parity-scale-codec = "3.0.0"
+reqwest = { version = "0.11.4", features = ["json"] }
+serde = "1"
+serde_json = "1"
+tokio = { version = "1.18.2", features = ["full"] }
+jsonrpsee = { version = "0.16.2", features = ["async-client", "client-ws-transport"] }
+
+# Various types and functions useful for interacting with substrate exist in these sp (substrate-primitives) crates:
+sp-runtime = { git = "https://github.com/InfraBlockchain/infra-substrate", branch = "master" }
+sp-core = { git = "https://github.com/InfraBlockchain/infra-substrate", branch = "master" }
+sp-keyring = { git = "https://github.com/InfraBlockchain/infra-substrate", branch = "master" }
+sp-version = { git = "https://github.com/InfraBlockchain/infra-substrate", branch = "master" }
+
+# XCM utilized for the 06_storage_iter example.
+xcm = { version = "0.9", git = "https://github.com/InfraBlockchain/infrablockspace", branch = "master", package = "xcm" }
+structopt = "0.3.25"
+subxt = { git = "https://github.com/paritytech/subxt", branch = "master" }
+# There are some types we want in the pallet crates (if we liked, we could just redefine them to save bringing these in):
+# pallet-balances = { git = "https://github.com/InfraBlockchain/infra-substrate", branch = "master" }
+# pallet-system = { git = "https://github.com/InfraBlockchain/infra-substrate", branch = "master" }
+# pallet-pot = { git = "https://github.com/InfraBlockchain/infra-substrate", branch = "master" }
