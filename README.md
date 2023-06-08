@@ -1,7 +1,7 @@
 
 # Examples of interacting with a InfraBlockSpace node
 
-Some examples of using JSON RPC to interact with a Polkadot node, working up to manually building and submitting a balance transfer.
+Some examples of using JSON RPC to interact with a InfraBlockSpace node, working up to manually building and submitting a balance transfer.
 
 To run these examples, first start up a local InfraBlockSpace node (which we'll be interacting with):
 
