@@ -10,50 +10,59 @@ use sp_version::RuntimeVersion;
 #[subxt::subxt(runtime_metadata_path = "metadata.scale")]
 pub mod relay_chain {}
 
-use relay_chain::runtime_types::xcm::v2::junction::Junction;
-use relay_chain::runtime_types::xcm::{
-    v2::{
-        multiasset::{AssetId, Fungibility, MultiAsset, MultiAssets},
-        multilocation::MultiLocation as V2MultiLocation,
-    },
-    // v3::{
-    //     multiasset::{AssetId, Fungibility, MultiAsset, MultiAssets},
-    //     multilocation::MultiLocation as V3MultiLocation,
-    // },
-    VersionedMultiAssets,
-    VersionedMultiLocation,
-};
+// import XCM module
 
-use relay_chain::runtime_types::xcm::v2::multilocation::Junctions;
+// use relay_chain::runtime_types::xcm::v2::junction::Junction;
+// use relay_chain::runtime_types::xcm::{
+//     v2::{
+//         multiasset::{AssetId, Fungibility, MultiAsset, MultiAssets},
+//         multilocation::MultiLocation as V2MultiLocation,
+//     },
+//     // v3::{
+//     //     multiasset::{AssetId, Fungibility, MultiAsset, MultiAssets},
+//     //     multilocation::MultiLocation as V3MultiLocation,
+//     // },
+//     VersionedMultiAssets,
+//     VersionedMultiLocation,
+// };
+
+// use relay_chain::runtime_types::xcm::v2::multilocation::Junctions;
 
 pub fn get_end_points(num: &str) -> Vec<&str> {
     match num {
-        "one" => vec!["http://localhost:9501"],
+        "one" => vec!["http://localhost:9601"],
         "two" => vec!["http://localhost:9501", "http://localhost:9601"],
         _ => Default::default(),
     }
 }
 
 #[derive(Encode, Decode, Clone)]
+pub struct SystemTokenId {
+    /// ParaId where to use the system token. Especially, we assigned the relaychain as ParaID = 0
+    pub para_id: u32,
+    /// PalletId on the parachain where to use the system token
+    pub pallet_id: u32,
+    /// AssetId on the parachain where to use the system token
+    pub asset_id: u32,
+}
+
+#[derive(Encode, Decode, Clone)]
 pub struct PotVote<AccountId> {
     #[codec(compact)]
     tip: u128,
-    asset_id: Option<u32>,
-    fee_payer: Option<AccountId>,
+    system_token_id: Option<SystemTokenId>,
     vote_candidate: Option<AccountId>,
 }
 
 impl<AccountId> PotVote<AccountId> {
     pub fn new(
         tip: u128,
-        asset_id: Option<u32>,
-        fee_payer: Option<AccountId>,
+        system_token_id: Option<SystemTokenId>,
         vote_candidate: Option<AccountId>,
     ) -> Self {
         Self {
             tip,
-            asset_id,
-            fee_payer,
+            system_token_id,
             vote_candidate,
         }
     }
@@ -146,14 +155,28 @@ impl TxManager {
         Ok(body["result"].take())
     }
 
-    pub async fn send_extrinsic(&self, pallet_index: u8, call_index: u8, caller: &AccountId32) {
+    pub async fn send_extrinsic(
+        &self,
+        pallet_index: u8,
+        call_index: u8,
+        caller: &AccountId32,
+        para_id: u32,
+        pallet_id: u32,
+        asset_id: u32,
+    ) {
+        let vote = SystemTokenId {
+            para_id,
+            pallet_id,
+            asset_id,
+        };
+
         let dest = MultiAddress::Id::<_, u32>(AccountKeyring::Bob.to_account_id());
-        let amount = Compact::from(123456789012345u128);
+        let amount = Compact::from(1234567890123u128);
         let caller_nonce = self.get_nonce(caller).await;
         let call = (pallet_index, call_index, dest, amount);
         let runtime_version = self.get_runtime_version().await;
         let genesis_hash = self.get_genesis_hash().await;
-        let extra = self.create_extra(caller_nonce, caller);
+        let extra = self.create_extra(caller_nonce, caller, vote);
         let additional = self.create_additional(runtime_version, genesis_hash);
         let sig = self.create_signature(
             sp_keyring::sr25519::Keyring::Alice,
@@ -172,13 +195,19 @@ impl TxManager {
         self.submit_extrinsic(payload_hex).await;
     }
 
-    pub async fn send_xcm(&self, encoded_data: Vec<u8>, account_keyring: Keyring) {
+    pub async fn send_xcm(
+        &self,
+        encoded_data: Vec<u8>,
+        account_keyring: Keyring,
+        // fee_payer_account_keyring: Option<Keyring>,
+        vote: SystemTokenId,
+    ) {
         // let a = sp_keyring::sr25519::Keyring::Alice;
         let caller = &account_keyring.to_account_id();
         let caller_nonce = self.get_nonce(caller).await;
         let runtime_version = self.get_runtime_version().await;
         let genesis_hash = self.get_genesis_hash().await;
-        let extra = self.create_extra(caller_nonce, caller);
+        let extra = self.create_extra(caller_nonce, caller, vote);
         let additional = self.create_additional(runtime_version, genesis_hash);
         let sig = self.create_signature_for_xcm(
             account_keyring,
@@ -186,9 +215,19 @@ impl TxManager {
             extra.clone(),
             additional,
         );
+
+        // let sig = self.create_signature_for_xcm(
+        //     account_keyring,
+        //     encoded_data.clone(),
+        //     extra.clone(),
+        //     additional,
+        // );
         let sig_to_encode = Some((
             MultiAddress::Id::<_, u32>(caller),
-            MultiSignature::Sr25519(sig),
+            MultiSignature::Sr25519(sig.clone()),
+            // follow below structure
+            // MultiAddress::Id::<_, u32>(caller),
+            // MultiSignature::Sr25519(sig),
             extra,
         ));
         let payload_scale_encode = self.encode_extrinsic_encoded_data(sig_to_encode, encoded_data);
@@ -198,92 +237,92 @@ impl TxManager {
     }
 
     // WIP: should be fixed
-    pub async fn send_xcm2(&self, pallet_index: u8, call_index: u8, caller: &AccountId32) {
-        let caller_nonce = self.get_nonce(caller).await;
-        let parachain_id = 2000u32;
+    // pub async fn send_xcm2(&self, pallet_index: u8, call_index: u8, caller: &AccountId32) {
+    //     let caller_nonce = self.get_nonce(caller).await;
+    //     let parachain_id = 2000u32;
 
-        let dest = VersionedMultiLocation::V2(V2MultiLocation {
-            parents: 1,
-            interior: Junctions::X1(Junction::Parachain(parachain_id)),
-        });
-        let bene_id = AccountKeyring::Bob.to_raw_public();
-        let beneficiary = VersionedMultiLocation::V2(V2MultiLocation {
-            parents: 0,
-            interior: Junctions::X1(Junction::AccountId32 {
-                network: relay_chain::runtime_types::xcm::v2::NetworkId::Any,
-                id: bene_id,
-            }),
-        });
-        let assets = VersionedMultiAssets::V2(MultiAssets(vec![MultiAsset {
-            id: AssetId::Concrete(V2MultiLocation {
-                parents: 0,
-                interior: Junctions::X2(Junction::PalletInstance(50), Junction::GeneralIndex(99)),
-            }),
-            fun: Fungibility::Fungible(1000000000000000),
-        }]));
+    //     let dest = VersionedMultiLocation::V2(V2MultiLocation {
+    //         parents: 1,
+    //         interior: Junctions::X1(Junction::Parachain(parachain_id)),
+    //     });
+    //     let bene_id = AccountKeyring::Bob.to_raw_public();
+    //     let beneficiary = VersionedMultiLocation::V2(V2MultiLocation {
+    //         parents: 0,
+    //         interior: Junctions::X1(Junction::AccountId32 {
+    //             network: relay_chain::runtime_types::xcm::v2::NetworkId::Any,
+    //             id: bene_id,
+    //         }),
+    //     });
+    //     let assets = VersionedMultiAssets::V2(MultiAssets(vec![MultiAsset {
+    //         id: AssetId::Concrete(V2MultiLocation {
+    //             parents: 0,
+    //             interior: Junctions::X2(Junction::PalletInstance(50), Junction::GeneralIndex(99)),
+    //         }),
+    //         fun: Fungibility::Fungible(1000000000000000),
+    //     }]));
 
-        let fee_asset_item = 0;
-        let call = (
-            pallet_index,
-            call_index,
-            dest,
-            beneficiary,
-            assets,
-            fee_asset_item,
-        );
+    //     let fee_asset_item = 0;
+    //     let call = (
+    //         pallet_index,
+    //         call_index,
+    //         dest,
+    //         beneficiary,
+    //         assets,
+    //         fee_asset_item,
+    //     );
 
-        let dest2 = VersionedMultiLocation::V2(V2MultiLocation {
-            parents: 1,
-            interior: Junctions::X1(Junction::Parachain(parachain_id)),
-        });
-        let bene_id2 = AccountKeyring::Bob.to_raw_public();
-        let beneficiary2 = VersionedMultiLocation::V2(V2MultiLocation {
-            parents: 0,
-            interior: Junctions::X1(Junction::AccountId32 {
-                network: relay_chain::runtime_types::xcm::v2::NetworkId::Any,
-                id: bene_id2,
-            }),
-        });
-        let assets2 = VersionedMultiAssets::V2(MultiAssets(vec![MultiAsset {
-            id: AssetId::Concrete(V2MultiLocation {
-                parents: 0,
-                interior: Junctions::X2(Junction::PalletInstance(50), Junction::GeneralIndex(99)),
-            }),
-            fun: Fungibility::Fungible(1000000000000000),
-        }]));
-        let call2 = (
-            pallet_index,
-            call_index,
-            dest2,
-            beneficiary2,
-            assets2,
-            fee_asset_item,
-        );
+    //     let dest2 = VersionedMultiLocation::V2(V2MultiLocation {
+    //         parents: 1,
+    //         interior: Junctions::X1(Junction::Parachain(parachain_id)),
+    //     });
+    //     let bene_id2 = AccountKeyring::Bob.to_raw_public();
+    //     let beneficiary2 = VersionedMultiLocation::V2(V2MultiLocation {
+    //         parents: 0,
+    //         interior: Junctions::X1(Junction::AccountId32 {
+    //             network: relay_chain::runtime_types::xcm::v2::NetworkId::Any,
+    //             id: bene_id2,
+    //         }),
+    //     });
+    //     let assets2 = VersionedMultiAssets::V2(MultiAssets(vec![MultiAsset {
+    //         id: AssetId::Concrete(V2MultiLocation {
+    //             parents: 0,
+    //             interior: Junctions::X2(Junction::PalletInstance(50), Junction::GeneralIndex(99)),
+    //         }),
+    //         fun: Fungibility::Fungible(1000000000000000),
+    //     }]));
+    //     let call2 = (
+    //         pallet_index,
+    //         call_index,
+    //         dest2,
+    //         beneficiary2,
+    //         assets2,
+    //         fee_asset_item,
+    //     );
 
-        println!("call2 : {:?}", call2);
+    //     println!("call2 : {:?}", call2);
 
-        let runtime_version = self.get_runtime_version().await;
-        let genesis_hash = self.get_genesis_hash().await;
-        let extra = self.create_extra(caller_nonce, caller);
-        let additional = self.create_additional(runtime_version, genesis_hash);
-        let sig = self.create_signature(
-            sp_keyring::sr25519::Keyring::Alice,
-            call,
-            extra.clone(),
-            additional,
-        );
-        let sig_to_encode = Some((
-            MultiAddress::Id::<_, u32>(caller),
-            MultiSignature::Sr25519(sig),
-            extra,
-        ));
-        let payload_scale_encode = self.encode_extrinsic(sig_to_encode, call2);
-        let payload_hex = format!("0x{}", hex::encode(payload_scale_encode));
+    //     let runtime_version = self.get_runtime_version().await;
+    //     let genesis_hash = self.get_genesis_hash().await;
+    //     let extra = self.create_extra(caller_nonce, caller);
+    //     let additional = self.create_additional(runtime_version, genesis_hash);
+    //     let sig = self.create_signature(
+    //         sp_keyring::sr25519::Keyring::Alice,
+    //         call,
+    //         extra.clone(),
+    //         additional,
+    //     );
+    //     let sig_to_encode = Some((
+    //         MultiAddress::Id::<_, u32>(caller),
+    //         MultiSignature::Sr25519(sig),
+    //         extra,
+    //     ));
+    //     let payload_scale_encode = self.encode_extrinsic(sig_to_encode, call2);
+    //     let payload_hex = format!("0x{}", hex::encode(payload_scale_encode));
 
-        // encoded_data: 0x1f0901010100411f01000101008eaf04151687736326c9fea17e25fc5287613693c912909cb226aa4794f26a4801040000020432058d01000f0080c6a47e8d030000000000
+    //     // encoded_data: 0x1f0901010100411f01000101008eaf04151687736326c9fea17e25fc5287613693c912909cb226aa4794f26a4801040000020432058d01000f0080c6a47e8d030000000000
 
-        self.submit_extrinsic(payload_hex).await;
-    }
+    //     self.submit_extrinsic(payload_hex).await;
+    // }
 
     async fn submit_extrinsic(&self, payload_hex: String) {
         let res = self
@@ -322,17 +361,14 @@ impl TxManager {
         &self,
         caller_nonce: u32,
         caller: &AccountId32,
+        system_token_id: SystemTokenId,
     ) -> (Era, Compact<u32>, PotVote<AccountId32>) {
-        (
-            Era::Immortal,
-            Compact(caller_nonce),
-            PotVote::new(
-                0,                    // tip
-                Some(99),             // asset id '1'
-                None,                 // No fee payer
-                Some(caller.clone()), // Vote to Alice
-            ),
-        )
+        let vote = PotVote::new(
+            0,                     // tip
+            Some(system_token_id), // asset id '1'
+            Some(caller.clone()),  // Vote to Alice
+        );
+        (Era::Immortal, Compact(caller_nonce), vote)
     }
 
     fn create_additional(
